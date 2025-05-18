@@ -17,4 +17,38 @@ app.use(cookieParser());
 
 //TODO Michi
 
+//Goals get
+
+//Goals update
+
+
+//Meals get
+
+//Meals create
+
+//Meals update
+app.put("/api/meals/:id", (req, res) => {
+  const meal = req.body
+
+  const id = req.params["id"]
+  // Additional verification possible (e.g., check that id is a number)
+
+  // We should validate dish here (does it contain all necessary fields, etc.).
+  // We could use a validation library for that, which could check the object agains a specified schema.
+
+  const updatedMeal = updateMeal(id, meal)
+
+  if (!updatedMeal) {
+    res.status(404).send()
+    return
+  }
+
+  // Explicit status 200 (OK) not necessary
+  res.status(200).json(updatedMeal)
+})
+
+//Meals delete
+
+
+
 module.exports = app;
