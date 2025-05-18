@@ -20,7 +20,7 @@ app.get("/", (req, res) => {
 
 //TODO Simon
 
-let curID = 0
+let curID = 1
 const exercises = []
 
 function getAllExercises() {
@@ -28,17 +28,23 @@ function getAllExercises() {
 }
 
 function getExerciseByID(id) {
-    return exercises.find(exercise => exercise.id === id)
+    const index = exercises.findIndex(e => e.id == id);
+    if (index === -1) {
+        return false;
+    }
+
+    return exercises[index]
 }
 
 function createNewExercise(exercise) {
     exercise.id = curID++
+    exercise.lastModified = new Date()
     exercises.push(exercise)
     return exercise
 }
 
 function changeFavorite(id, favorite) {
-    const index = exercises.findIndex(e => e.id === id);
+    const index = exercises.findIndex(e => e.id == id);
     if (index === -1) {
         return false;
     }
@@ -47,8 +53,7 @@ function changeFavorite(id, favorite) {
 }
 
 function updateExercise(id, exercise) {
-    const index = exercises.findIndex(e => e.id === id)
-    console.log(index)
+    const index = exercises.findIndex(e => e.id == id)
     if (index === -1) {
         return null;
     }
@@ -59,8 +64,7 @@ function updateExercise(id, exercise) {
 }
 
 function deleteExercise(id) {
-  // TODO: Delete from DB
-  const index = exercises.findIndex(e => e.id === id);
+  const index = exercises.findIndex(e => e.id == id);
   if (index === -1) {
     return false;
   }
@@ -71,38 +75,47 @@ function deleteExercise(id) {
 // Get exercises
 
 app.get("/api/exercises", (req, res) => {
-    res.json({dishes: getAllExercises()})
+    res.json({exercises: getAllExercises()})
 })
 
-app.get("/api/exercise", (req, res) => {
-    const id = req.query.id
-
+app.get("/api/exercises/:id", (req, res) => {
+    const id = req.params.id
     if(!id) {
         res.status(400).json({error: "Request must contain an ID query parameter"})
         return
+    }
+    if (isNaN(id)) {
+        res.status(400).json({error: "ID must be a number"})
+        return;
+    }
+    const exercise = getExerciseByID(id)
+    if(!exercise) {
+        res.status(404).json({error: "Element with given ID does not exist"})
+    } else {
+        res.json(exercise)
     }
 })
 
 //Post exercises (create new)
 
-app.post("/api/exercise/create", (req, res) => {
+app.post("/api/exercises", (req, res) => {
     const newExercise = req.body
     const newExerciseWithID = createNewExercise(newExercise)
 
-    res.status(201).json(newExerciseWithID)
+    res.status(201).json({kind: "Confirmation", message: "Creation successful", exercise: newExerciseWithID})
 })
 
 //Put exercise (update exercise)
 
-app.put("/api/exercise/update", (req, res) => {
+app.put("/api/exercises/:id", (req, res) => {
     const exercise = req.body
-    const id = req.query["id"]
+    const id = req.params.id
 
     if(!id) {
         res.status(400).json({error: "Request must contain an ID query parameter"})
         return
     }
-    if (typeof id !== "number") {
+    if (isNaN(id)) {
         res.status(400).json({error: "ID must be a number"})
         return;
     }
@@ -113,19 +126,20 @@ app.put("/api/exercise/update", (req, res) => {
         res.status(404).send()
         return
     }
+    res.json({kind: "Confirmation", message: "Updating successful", updatedExercise: updatedExercise, })
 })
 
 //Patch exercise (favorite exercise)
 
-app.patch("/api/exercise/favorite", (req, res) => {
-    const id = req.query["id"]
-    const favorite = req.query["favorite"]
+app.patch("/api/exercises/:id", (req, res) => {
+    const id = req.params.id
+    const favorite = req.query.favorite
 
     if(!id) {
         res.status(400).json({error: "Request must contain an ID query parameter"})
         return
     }
-    if (typeof id !== "number") {
+    if (isNaN(id)) {
         res.status(400).json({error: "ID must be a number"})
         return;
     }
@@ -133,7 +147,7 @@ app.patch("/api/exercise/favorite", (req, res) => {
     const success = changeFavorite(id, favorite)
 
     if(success) {
-        res.status(200).send({kind: "Confirmation", message: "Favoriting successful", id: id})
+        res.status(200).send({kind: "Confirmation", message: "Favoriting successful", id: id, favorite: favorite})
     } else {
         res.status(404).send({kind: "Error", message: "Favoriting not successful", id: id})
     }
@@ -143,14 +157,14 @@ app.patch("/api/exercise/favorite", (req, res) => {
 
 //Delete exercise (delete exercise)
 
-app.delete("/api/exercise/delete", (req, res) => {
-    const id = req.query["id"]
+app.delete("/api/exercises/:id", (req, res) => {
+    const id = req.params.id
 
     if (!id) {
         res.status(400).send({error: "Request must contain an ID query parameter"})
         return
   }
-    if (typeof id !== "number") {
+    if (isNaN(id)) {
         res.status(400).json({error: "ID must be a number"})
         return;
     }
