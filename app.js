@@ -7,6 +7,7 @@ var cors = require('cors');
 
 var app = express();
 
+app.use(cors()); // Enable CORS for all routes - good for development
 app.use(logger('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
