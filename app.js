@@ -187,10 +187,10 @@ app.delete("/api/exercises/:id", (req, res) => {
 const meals = []
 
 const goals = {
-  calories: 2500,
+  calories: 3000,
   proteins: 150,
   fats: 70,
-  carbs: 300
+  carbohydrates: 200
 };
 
 function getAllMeals() {
@@ -277,7 +277,7 @@ app.get("/api/goals/:goalType", (req, res) => {
 app.put("/api/goals", (req, res) => {
   const { goalType, value } = req.body
 
-  if (typeof goalType !== "string" || typeof value !== "number" || value <= 0) {
+  if (typeof goalType !== "string" || typeof value !== "number" || value < 0) {
     return res.status(400).json({ error: "Invalid goalType or value" });
   }
   const success = updateGoal(goalType, value)
