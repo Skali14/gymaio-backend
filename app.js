@@ -5,6 +5,26 @@ var logger = require('morgan');
 const e = require("express");
 var cors = require('cors');
 
+const jwt = require('jsonwebtoken');
+const JWT_SECRET = process.env.JWT_SECRET || 'your_dev_secret_here';
+
+const verifyToken = (req, res, next) => {
+  const token = req.headers['authorization']?.split(' ')[1]; // Bearer <token>
+
+  if (!token) {
+    return res.status(401).json({ message: 'Token missing' });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(403).json({ message: 'Token invalid or expired' });
+    }
+
+    req.user = decoded; // You now have the payload (e.g., user ID, roles)
+    next();
+  });
+};
+
 var app = express();
 
 app.use(cors()); // Enable CORS for all routes - good for development
@@ -19,6 +39,51 @@ app.get("/", (req, res) => {
     { message: "I am functioning correctly!" }
   )
 })
+
+const users = [
+  { email: 'test@gmail.com', password: 'password123' },
+  { email: 'test2@gmail.com', password: 'secret456' },
+];
+
+// Simple Login Endpoint (Typically POST)
+app.post("/api/login", (req, res) => {
+  const { email, password } = req.body; // Assuming email and password in request body
+
+  const user = users.find(u => u.email === email && u.password === password);
+  if (user) {
+    const token = jwt.sign({ email: user.email }, JWT_SECRET, { expiresIn: '1h' });
+    res.json({ message: "Login successful", token: token });
+  } else {
+    res.status(401).json({ error: "Invalid credentials" });
+  }
+});
+
+// Register endpoint
+app.post('/api/register', (req, res) => {
+  const { firstname, lastname, email, password } = req.body;
+
+  // Basic validation
+  if (!firstname || !lastname ||!email ||!password) {
+    return res.status(400).json({ message: 'firstname, lastname, email and password required' });
+  }
+
+  // Check if user already exists
+  const existingUser = users.find(u => u.email === email);
+  if (existingUser) {
+    return res.status(409).json({ message: 'User already exists' });
+  }
+
+  // Add new user
+  const newUser = { email, password }; // NOTE: password should be hashed in real apps
+  users.push(newUser);
+
+  // Optional: return JWT on signup
+  //const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '1h' });
+
+  res.status(201).json({ message: 'User registered'});
+});
+
+
 
 //TODO Simon
 
@@ -183,6 +248,9 @@ app.delete("/api/exercises/:id", (req, res) => {
 //-------------------------------------------------------------------------------------------------------
 
 //TODO Michi
+
+
+
 
 const meals = []
 
