@@ -19,7 +19,7 @@ const verifyToken = (req, res, next) => {
     if (err) {
       return res.status(403).json({ message: 'Token invalid or expired' });
     }
-
+    console.log('Decoded user:', decoded);
     req.user = decoded; // You now have the payload (e.g., user ID, roles)
     next();
   });
@@ -323,12 +323,12 @@ function deleteGoal(goalType) {
 
 
 //Goals get
-app.get("/api/goals", (req, res) => {
+app.get("/api/goals", verifyToken, (req, res) => {
   res.json({goals: getAllGoals()})
 })
 
 //Goals get by type
-app.get("/api/goals/:goalType", (req, res) => {
+app.get("/api/goals/:goalType", verifyToken, (req, res) => {
   const goalType = req.params.goalType;
 
   const goal = getGoalByType(goalType);
@@ -342,7 +342,7 @@ app.get("/api/goals/:goalType", (req, res) => {
 
 
 //Goals update
-app.put("/api/goals", (req, res) => {
+app.put("/api/goals", verifyToken, (req, res) => {
   const { goalType, value } = req.body
 
   if (typeof goalType !== "string" || typeof value !== "number" || value < 0) {
@@ -357,12 +357,12 @@ app.put("/api/goals", (req, res) => {
 
 
 //Meals get
-app.get("/api/meals", (_req, res) => {
+app.get("/api/meals", verifyToken, (_req, res) => {
   res.json({ meals: getAllMeals() })
 })
 
 //Meals create
-app.post("/api/meals", (req, res) => {
+app.post("/api/meals", verifyToken, (req, res) => {
   const meal = req.body 
   //TODO validate meal
 
@@ -372,7 +372,7 @@ app.post("/api/meals", (req, res) => {
 
 
 //Meals update
-app.put("/api/meals/:id", (req, res) => {
+app.put("/api/meals/:id", verifyToken, (req, res) => {
   const meal = req.body
 
   const idParam = req.params["id"];
@@ -395,7 +395,7 @@ app.put("/api/meals/:id", (req, res) => {
 })
 
 //Meals delete
-app.delete("/api/meals/:id" , (req, res) => {
+app.delete("/api/meals/:id", verifyToken, (req, res) => {
   const idParam = req.params["id"];
   const id = Number(idParam);
 
