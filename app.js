@@ -17,7 +17,7 @@ const verifyToken = (req, res, next) => {
 
   jwt.verify(token, JWT_SECRET, (err, decoded) => {
     if (err) {
-      return res.status(403).json({ message: 'Token invalid or expired' });
+      return res.status(401).json({ message: 'Token invalid or expired' });
     }
     console.log('Decoded user:', decoded);
     req.user = decoded; // You now have the payload (e.g., user ID, roles)
@@ -84,68 +84,71 @@ app.post('/api/register', (req, res) => {
 });
 
 
-
-//TODO Simon
-
 let curID = 1
-const exercises = []
+const exercises = new Map()
 
-function getAllExercises() {
-    return exercises
+function getAllExercises(email) {
+    if (!exercises.has(email)) {
+        exercises.set(email, [])
+    }
+
+    return exercises.get(email)
 }
 
-function getExerciseByID(id) {
-    const index = exercises.findIndex(e => e.id == id);
+function getExerciseByID(email, id) {
+    const index = exercises.get(email).findIndex(e => e.id == id);
     if (index === -1) {
         return false;
     }
 
-    return exercises[index]
+    return exercises.get(email)[index]
 }
 
-function createNewExercise(exercise) {
+function createNewExercise(email, exercise) {
     exercise.id = curID++
     exercise.lastModified = new Date()
-    exercises.push(exercise)
+    if (exercises.has(email)) {
+        exercises.get(email).push(exercise)
+    }
     return exercise
 }
 
-function changeFavorite(id, favorite) {
-    const index = exercises.findIndex(e => e.id == id);
+function changeFavorite(email, id, favorite) {
+    const index = exercises.get(email).findIndex(e => e.id == id);
     if (index === -1) {
         return false;
     }
-    getExerciseByID(id).favorite = favorite
+    getExerciseByID(email, id).favorite = favorite
     return true
 }
 
-function updateExercise(id, exercise) {
-    const index = exercises.findIndex(e => e.id == id)
+function updateExercise(email, id, exercise) {
+    const index = exercises.get(email).findIndex(e => e.id == id)
     if (index === -1) {
         return null;
     }
     exercise.id = id
     exercise.lastModified = new Date()
-    exercises[index] = exercise;
+    exercises.get(email)[index] = exercise;
     return exercise;
 }
 
-function deleteExercise(id) {
-  const index = exercises.findIndex(e => e.id == id);
+function deleteExercise(email, id) {
+  const index = exercises.get(email).findIndex(e => e.id == id);
   if (index === -1) {
     return false;
   }
-  exercises.splice(index, 1);
+  exercises.get(email).splice(index, 1);
   return true;
 }
 
 // Get exercises
 
-app.get("/api/exercises", (req, res) => {
-    res.json({exercises: getAllExercises()})
+app.get("/api/exercises", verifyToken, (req, res) => {
+    res.json({exercises: getAllExercises(req.user.email)})
 })
 
-app.get("/api/exercises/:id", (req, res) => {
+app.get("/api/exercises/:id", verifyToken, (req, res) => {
     const id = req.params.id
     if(!id) {
         res.status(400).json({error: "Request must contain an ID query parameter"})
@@ -155,7 +158,7 @@ app.get("/api/exercises/:id", (req, res) => {
         res.status(400).json({error: "ID must be a number"})
         return;
     }
-    const exercise = getExerciseByID(id)
+    const exercise = getExerciseByID(req.user.email, id)
     if(!exercise) {
         res.status(404).json({error: "Element with given ID does not exist"})
     } else {
@@ -165,16 +168,16 @@ app.get("/api/exercises/:id", (req, res) => {
 
 //Post exercises (create new)
 
-app.post("/api/exercises", (req, res) => {
+app.post("/api/exercises", verifyToken, (req, res) => {
     const newExercise = req.body
-    const newExerciseWithID = createNewExercise(newExercise)
+    const newExerciseWithID = createNewExercise(req.user.email, newExercise)
 
     res.status(201).json({kind: "Confirmation", message: "Creation successful", exercise: newExerciseWithID})
 })
 
 //Put exercise (update exercise)
 
-app.put("/api/exercises/:id", (req, res) => {
+app.put("/api/exercises/:id", verifyToken, (req, res) => {
     const exercise = req.body
     const id = req.params.id
 
@@ -187,7 +190,7 @@ app.put("/api/exercises/:id", (req, res) => {
         return;
     }
 
-    const updatedExercise = updateExercise(id, exercise)
+    const updatedExercise = updateExercise(req.user.email, id, exercise)
 
     if (!updatedExercise) {
         res.status(404).send()
@@ -198,7 +201,7 @@ app.put("/api/exercises/:id", (req, res) => {
 
 //Patch exercise (favorite exercise)
 
-app.patch("/api/exercises/:id", (req, res) => {
+app.patch("/api/exercises/:id", verifyToken, (req, res) => {
     const id = req.params.id
     const favorite = req.query.favorite
 
@@ -211,7 +214,7 @@ app.patch("/api/exercises/:id", (req, res) => {
         return;
     }
 
-    const success = changeFavorite(id, favorite)
+    const success = changeFavorite(req.user.email, id, favorite)
 
     if(success) {
         res.status(200).send({kind: "Confirmation", message: "Favoriting successful", id: id, favorite: favorite})
@@ -224,7 +227,7 @@ app.patch("/api/exercises/:id", (req, res) => {
 
 //Delete exercise (delete exercise)
 
-app.delete("/api/exercises/:id", (req, res) => {
+app.delete("/api/exercises/:id", verifyToken, (req, res) => {
     const id = req.params.id
 
     if (!id) {
@@ -236,7 +239,7 @@ app.delete("/api/exercises/:id", (req, res) => {
         return;
     }
 
-    const success = deleteExercise(id)
+    const success = deleteExercise(req.user.email, id)
 
     if(success) {
         res.status(200).send({kind: "Confirmation", message: "Deletion successful", id: id})
@@ -248,9 +251,6 @@ app.delete("/api/exercises/:id", (req, res) => {
 //-------------------------------------------------------------------------------------------------------
 
 //TODO Michi
-
-
-
 
 const meals = []
 
