@@ -107,9 +107,7 @@ function getExerciseByID(email, id) {
 function createNewExercise(email, exercise) {
     exercise.id = curID++
     exercise.lastModified = new Date()
-    if (exercises.has(email)) {
-        exercises.get(email).push(exercise)
-    }
+    exercises.get(email).push(exercise)
     return exercise
 }
 
@@ -250,7 +248,134 @@ app.delete("/api/exercises/:id", verifyToken, (req, res) => {
 
 //-------------------------------------------------------------------------------------------------------
 
-//TODO Michi
+const plans = new Map()
+
+function getAllPlans(email) {
+    if (!plans.has(email)) {
+        plans.set(email, [])
+    }
+
+    return plans.get(email)
+}
+
+function getPlanByID(email, id) {
+    const index = plans.get(email).findIndex(p => p.id == id);
+    if (index === -1) {
+        return false;
+    }
+
+    return plans.get(email)[index]
+}
+
+function createNewPlan(email, plan) {
+    plan.id = curID++
+    plan.lastModified = new Date()
+    plans.get(email).push(plan)
+    return plan
+}
+
+function updatePlan(email, id, plan) {
+    const index = plans.get(email).findIndex(p => p.id == id)
+    if (index === -1) {
+        return null;
+    }
+    plan.id = id
+    plan.lastModified = new Date()
+    plans.get(email)[index] = plan;
+    return plan;
+}
+
+function deletePlan(email, id) {
+    const index = plans.get(email).findIndex(p => p.id == id);
+    if (index === -1) {
+        return false;
+    }
+    plans.get(email).splice(index, 1);
+    return true;
+}
+
+// Get plans
+
+app.get("/api/plans", verifyToken, (req, res) => {
+    res.json({plans: getAllPlans(req.user.email)})
+})
+
+app.get("/api/plans/:id", verifyToken, (req, res) => {
+    const id = req.params.id
+    if(!id) {
+        res.status(400).json({error: "Request must contain an ID query parameter"})
+        return
+    }
+    if (isNaN(id)) {
+        res.status(400).json({error: "ID must be a number"})
+        return;
+    }
+    const plan = getPlanByID(req.user.email, id)
+    if(!plan) {
+        res.status(404).json({error: "Element with given ID does not exist"})
+    } else {
+        res.json(plan)
+    }
+})
+
+//Post Plans (create new)
+
+app.post("/api/plans", verifyToken, (req, res) => {
+    const newPlan = req.body
+    const newPlanWithID = createNewPlan(req.user.email, newPlan)
+
+    res.status(201).json({kind: "Confirmation", message: "Creation successful", plan: newPlanWithID})
+})
+
+//Put Plan (update plan)
+
+app.put("/api/plans/:id", verifyToken, (req, res) => {
+    const plan = req.body
+    const id = req.params.id
+
+    if(!id) {
+        res.status(400).json({error: "Request must contain an ID query parameter"})
+        return
+    }
+    if (isNaN(id)) {
+        res.status(400).json({error: "ID must be a number"})
+        return;
+    }
+
+    const updatedPlan = updatePlan(req.user.email, id, plan)
+
+    if (!updatedPlan) {
+        res.status(404).send()
+        return
+    }
+    res.json({kind: "Confirmation", message: "Updating successful", updatedPlan: updatedPlan})
+})
+
+//Delete plan
+
+app.delete("/api/plans/:id", verifyToken, (req, res) => {
+    const id = req.params.id
+
+    if (!id) {
+        res.status(400).send({error: "Request must contain an ID query parameter"})
+        return
+    }
+    if (isNaN(id)) {
+        res.status(400).json({error: "ID must be a number"})
+        return;
+    }
+
+    const success = deletePlan(req.user.email, id)
+
+    if(success) {
+        res.status(200).send({kind: "Confirmation", message: "Deletion successful", id: id})
+    } else {
+        res.status(404).send({kind: "Error", message: "Deletion not successful", id: id})
+    }
+})
+
+//-------------------------------------------------------------------------------------------------------
+
 
 const meals = []
 
