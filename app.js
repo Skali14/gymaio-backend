@@ -41,8 +41,8 @@ app.get("/", (req, res) => {
 })
 
 const users = [
-  { email: 'test@gmail.com', password: 'password123' },
-  { email: 'test2@gmail.com', password: 'secret456' },
+  { email: 'test@gmail.com', password: 'password123', admin: false},
+  { email: 'test2@gmail.com', password: 'secret456', admin: true },
 ];
 
 // Simple Login Endpoint (Typically POST)
@@ -74,7 +74,7 @@ app.post('/api/register', (req, res) => {
   }
 
   // Add new user
-  const newUser = { email, password }; // NOTE: password should be hashed in real apps
+  const newUser = { email, password, admin: false }; // NOTE: password should be hashed in real apps
   users.push(newUser);
 
   // Optional: return JWT on signup
@@ -82,6 +82,25 @@ app.post('/api/register', (req, res) => {
 
   res.status(201).json({ message: 'User registered'});
 });
+
+//get user
+app.get("/api/user", verifyToken, (req, res) => {
+  // Find user by email from the decoded token
+  const user = users.find(u => u.email === req.user.email);
+  
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+
+  // Return user data without sensitive information (password)
+  const userData = {
+    email: user.email,
+    admin: user.admin,
+    // Add other user fields as needed
+  };
+
+  res.json({user: userData});
+})
 
 
 let curID = 1
