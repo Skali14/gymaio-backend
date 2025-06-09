@@ -3,10 +3,68 @@ var path = require('path');
 var cookieParser = require('cookie-parser');
 var logger = require('morgan');
 const e = require("express");
+const { MongoClient, ServerApiVersion, ObjectId} = require('mongodb');
 var cors = require('cors');
 
 const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'your_dev_secret_here';
+const uri = 'mongodb+srv://admin:GymAIO123@gymaio.fzchvtj.mongodb.net/?retryWrites=true&w=majority&appName=GymAIO';
+
+const client = new MongoClient(uri, {
+    serverApi: {
+        version: ServerApiVersion.v1,
+        strict: true,
+        deprecationErrors: true,
+    }
+});
+
+const dbName = "gymaio";
+const exercisesCollectionName = "exercises";
+const mealsCollectionName = "goals";
+const goalsCollectionName = "meals";
+const plansCollectionName = "plans";
+const recentWorkoutsCollectionName = "recentWorkouts";
+const usersCollectionName = "users";
+
+async function connectDB() {
+    try {
+        await client.connect();
+        // Ping the 'foodioo' database to confirm connection
+        await client.db(dbName).command({ ping: 1 });
+        console.log("Connection to DB successful");
+    } catch (err) {
+        console.error("Error during DB connection: ", err);
+        // Critical error: If the database isn't available, the app can't function.
+        // Consider exiting the process or implementing a retry mechanism for production.
+        process.exit(1); // Exit if DB connection fails on startup
+    }
+}
+
+connectDB(); // Call connectDB to establish the connection when the app starts
+
+function exercises() {
+    return client.db(dbName).collection(exercisesCollectionName);
+}
+
+function meals() {
+    return client.db(dbName).collection(mealsCollectionName);
+}
+
+function goals() {
+    return client.db(dbName).collection(goalsCollectionName);
+}
+
+function plans() {
+    return client.db(dbName).collection(plansCollectionName);
+}
+
+function recentWorkouts() {
+    return client.db(dbName).collection(recentWorkoutsCollectionName);
+}
+
+function users() {
+    return client.db(dbName).collection(usersCollectionName);
+}
 
 const verifyToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1]; // Bearer <token>
@@ -41,143 +99,164 @@ app.get("/", (req, res) => {
   )
 })
 
-const users = [
-  { email: 'test@gmail.com', password: 'password123', admin: false},
-  { email: 'test2@gmail.com', password: 'secret456', admin: true },
-];
-
 // Simple Login Endpoint (Typically POST)
-app.post("/api/login", (req, res) => {
-  const { email, password } = req.body; // Assuming email and password in request body
+app.post("/api/login", async (req, res) => {
+    const {email, password} = req.body; // Assuming email and password in request body
 
-  const user = users.find(u => u.email === email && u.password === password);
-  if (user) {
-    const token = jwt.sign({ email: user.email }, JWT_SECRET, { expiresIn: '1h' });
-    res.json({ message: "Login successful", token: token });
-  } else {
-    res.status(401).json({ error: "Invalid credentials" });
-  }
+    const user = await users().findOne({email: email, password: password});
+    if (user) {
+        const token = jwt.sign({email: user.email, id: user._id.toString()}, JWT_SECRET, {expiresIn: '1h'});
+        res.json({message: "Login successful", token: token});
+    } else {
+        res.status(401).json({error: "Invalid credentials"});
+    }
 });
 
 // Register endpoint
-app.post('/api/register', (req, res) => {
-  const { firstname, lastname, email, password } = req.body;
+app.post('/api/register', async (req, res) => {
+    const {firstname, lastname, email, password} = req.body;
 
-  // Basic validation
-  if (!firstname || !lastname ||!email ||!password) {
-    return res.status(400).json({ message: 'firstname, lastname, email and password required' });
-  }
+    // Basic validation
+    if (!firstname || !lastname || !email || !password) {
+        return res.status(400).json({message: 'firstname, lastname, email and password required'});
+    }
 
-  // Check if user already exists
-  const existingUser = users.find(u => u.email === email);
-  if (existingUser) {
-    return res.status(409).json({ message: 'User already exists' });
-  }
+    // Check if user already exists
+    const existingUser = await users().findOne({email: email});
+    if (existingUser) {
+        return res.status(409).json({message: 'User already exists'});
+    }
 
-  // Add new user
-  const newUser = { email, password, admin: false }; // NOTE: password should be hashed in real apps
-  users.push(newUser);
+    // Add new user
+    const newUser = {email, password, admin: false}; // NOTE: password should be hashed in real apps
+    await users().insertOne(newUser);
 
-  // Optional: return JWT on signup
-  //const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '1h' });
+    // Optional: return JWT on signup
+    //const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '1h' });
 
-  res.status(201).json({ message: 'User registered'});
+    res.status(201).json({message: 'User registered'});
 });
 
 //get user
-app.get("/api/user", verifyToken, (req, res) => {
-  // Find user by email from the decoded token
-  const user = users.find(u => u.email === req.user.email);
-  
-  if (!user) {
-    return res.status(404).json({ message: 'User not found' });
-  }
+app.get("/api/user", verifyToken, async (req, res) => {
+    // Find user by email from the decoded token
+    const user = await users().findOne({email: req.user.email});
 
-  // Return user data without sensitive information (password)
-  const userData = {
-    email: user.email,
-    admin: user.admin,
-    // Add other user fields as needed
-  };
+    if (!user) {
+        return res.status(404).json({message: 'User not found'});
+    }
 
-  res.json({user: userData});
+    // Return user data without sensitive information (password)
+    const userData = {
+        id: user._id.toString(),
+        email: user.email,
+        admin: user.admin,
+        // Add other user fields as needed
+    };
+    res.json({user: userData});
 })
 
 
 let curID = 1
-const exercises = new Map()
 
-function getAllExercises(email) {
-    if (!exercises.has(email)) {
-        exercises.set(email, [])
+async function getAllExercises(userId) {
+    if (!ObjectId.isValid(userId)) {
+        console.error("UserId is not valid for getAllExercises");
+        return null; // Return null if ID is not valid, leading to a 404 in the route
     }
 
-    return exercises.get(email)
+    return await exercises().find({userId: new ObjectId(userId)}).toArray()
 }
 
-function getExerciseByID(email, id) {
-    const index = exercises.get(email).findIndex(e => e.id == id);
-    if (index === -1) {
-        return false;
+async function getExerciseByID(userId, exerciseId) {
+
+    if (!ObjectId.isValid(userId) || !ObjectId.isValid(exerciseId)) {
+        console.error("UserId or ExerciseId is not valid for getExerciseByID");
+        return null; // Return null if ID is not valid, leading to a 404 in the route
     }
 
-    return exercises.get(email)[index]
+    return await exercises().findOne({_id: new ObjectId(exerciseId), userId: new ObjectId(userId)})
 }
 
-function createNewExercise(email, exercise) {
-    exercise.id = curID++
+async function createNewExercise(userId, exercise) {
+    if (!ObjectId.isValid(userId)) {
+        console.error("UserId is not valid for createNewExercise");
+        return null; // Return null if ID is not valid
+    }
+
     exercise.lastModified = new Date()
-    exercises.get(email).push(exercise)
+    exercise.userId = new ObjectId(userId)
+    await exercises().insertOne(exercise)
     return exercise
 }
 
-function changeFavorite(email, id, favorite) {
-    const index = exercises.get(email).findIndex(e => e.id == id);
-    if (index === -1) {
-        return false;
+async function changeFavorite(userId, exerciseId, favorite) {
+    if (!ObjectId.isValid(userId) || !ObjectId.isValid(exerciseId)) {
+        console.error("UserId or ExerciseId is not valid for changeFavorite");
+        return null; // Return null if ID is not valid
     }
-    getExerciseByID(email, id).favorite = favorite
+    let test = await exercises().findOneAndUpdate(
+        {userId: new ObjectId(userId), _id: new ObjectId(exerciseId)}, // Filter by ID
+        {
+            $set: {
+                favorite: favorite, // Apply updates from dishData
+                lastModified: new Date() // Update the lastModified timestamp
+            }
+        },
+        {returnDocument: 'after'} // Options: return the modified document
+    );
     return true
 }
 
-function updateExercise(email, id, exercise) {
-    const index = exercises.get(email).findIndex(e => e.id == id)
-    if (index === -1) {
-        return null;
+async function updateExercise(userId, exerciseId, exercise) {
+    if (!ObjectId.isValid(userId) || !ObjectId.isValid(exerciseId)) {
+        console.error("UserId or ExerciseId is not valid for updateExercise");
+        return null; // Return null if ID is not valid
     }
-    exercise.id = id
-    exercise.lastModified = new Date()
-    exercises.get(email)[index] = exercise;
-    return exercise;
+
+    // Otherwise we get an error because _id is immutable
+    if ('_id' in exercise ||'userId' in exercise) {
+        delete exercise._id;
+        delete exercise.userId;
+    }
+
+    return await exercises().findOneAndUpdate(
+        {userId: new ObjectId(userId), _id: new ObjectId(exerciseId)}, // Filter by ID
+        {
+            $set: {
+                ...exercise, // Apply updates from dishData
+                lastModified: new Date() // Update the lastModified timestamp
+            }
+        },
+        {returnDocument: 'after'} // Options: return the modified document
+    );
 }
 
-function deleteExercise(email, id) {
-  const index = exercises.get(email).findIndex(e => e.id == id);
-  if (index === -1) {
-    return false;
-  }
-  exercises.get(email).splice(index, 1);
-  return true;
+async function deleteExercise(userId, exerciseId) {
+    if (!ObjectId.isValid(userId) || !ObjectId.isValid(exerciseId)) {
+        console.error("UserId or ExerciseId is not valid for updateExercise");
+        return null; // Return null if ID is not valid
+    }
+
+    const result = await exercises().deleteOne({_id: new ObjectId(exerciseId), userId: new ObjectId(userId)});
+    return result.deletedCount > 0;
 }
 
 // Get exercises
 
-app.get("/api/exercises", verifyToken, (req, res) => {
-    res.json({exercises: getAllExercises(req.user.email)})
+app.get("/api/exercises", verifyToken, async (req, res) => {
+    res.json({exercises: await getAllExercises(req.user.id)})
 })
 
-app.get("/api/exercises/:id", verifyToken, (req, res) => {
+app.get("/api/exercises/:id", verifyToken, async (req, res) => {
     const id = req.params.id
-    if(!id) {
+    if (!id) {
         res.status(400).json({error: "Request must contain an ID query parameter"})
         return
     }
-    if (isNaN(id)) {
-        res.status(400).json({error: "ID must be a number"})
-        return;
-    }
-    const exercise = getExerciseByID(req.user.email, id)
-    if(!exercise) {
+
+    const exercise = await getExerciseByID(req.user.id, id)
+    if (!exercise) {
         res.status(404).json({error: "Element with given ID does not exist"})
     } else {
         res.json(exercise)
@@ -186,55 +265,46 @@ app.get("/api/exercises/:id", verifyToken, (req, res) => {
 
 //Post exercises (create new)
 
-app.post("/api/exercises", verifyToken, (req, res) => {
+app.post("/api/exercises", verifyToken, async (req, res) => {
     const newExercise = req.body
-    const newExerciseWithID = createNewExercise(req.user.email, newExercise)
+    const newExerciseWithID = await createNewExercise(req.user.id, newExercise)
 
     res.status(201).json({kind: "Confirmation", message: "Creation successful", exercise: newExerciseWithID})
 })
 
 //Put exercise (update exercise)
 
-app.put("/api/exercises/:id", verifyToken, (req, res) => {
+app.put("/api/exercises/:id", verifyToken, async (req, res) => {
     const exercise = req.body
     const id = req.params.id
 
-    if(!id) {
+    if (!id) {
         res.status(400).json({error: "Request must contain an ID query parameter"})
         return
     }
-    if (isNaN(id)) {
-        res.status(400).json({error: "ID must be a number"})
-        return;
-    }
 
-    const updatedExercise = updateExercise(req.user.email, id, exercise)
+    const updatedExercise = await updateExercise(req.user.id, id, exercise)
 
     if (!updatedExercise) {
         res.status(404).send()
         return
     }
-    res.json({kind: "Confirmation", message: "Updating successful", updatedExercise: updatedExercise, })
+    res.json({kind: "Confirmation", message: "Updating successful", updatedExercise: updatedExercise,})
 })
 
 //Patch exercise (favorite exercise)
 
-app.patch("/api/exercises/:id", verifyToken, (req, res) => {
+app.patch("/api/exercises/:id", verifyToken, async (req, res) => {
     const id = req.params.id
-    const favorite = req.query.favorite
+    const favorite = req.query.favorite === 'true'
 
-    if(!id) {
+    if (!id) {
         res.status(400).json({error: "Request must contain an ID query parameter"})
         return
     }
-    if (isNaN(id)) {
-        res.status(400).json({error: "ID must be a number"})
-        return;
-    }
+    const success = await changeFavorite(req.user.id, id, favorite)
 
-    const success = changeFavorite(req.user.email, id, favorite)
-
-    if(success) {
+    if (success) {
         res.status(200).send({kind: "Confirmation", message: "Favoriting successful", id: id, favorite: favorite})
     } else {
         res.status(404).send({kind: "Error", message: "Favoriting not successful", id: id})
@@ -245,21 +315,17 @@ app.patch("/api/exercises/:id", verifyToken, (req, res) => {
 
 //Delete exercise (delete exercise)
 
-app.delete("/api/exercises/:id", verifyToken, (req, res) => {
+app.delete("/api/exercises/:id", verifyToken, async (req, res) => {
     const id = req.params.id
 
     if (!id) {
         res.status(400).send({error: "Request must contain an ID query parameter"})
         return
-  }
-    if (isNaN(id)) {
-        res.status(400).json({error: "ID must be a number"})
-        return;
     }
 
-    const success = deleteExercise(req.user.email, id)
+    const success = await deleteExercise(req.user.id, id)
 
-    if(success) {
+    if (success) {
         res.status(200).send({kind: "Confirmation", message: "Deletion successful", id: id})
     } else {
         res.status(404).send({kind: "Error", message: "Deletion not successful", id: id})
@@ -268,70 +334,85 @@ app.delete("/api/exercises/:id", verifyToken, (req, res) => {
 
 //-------------------------------------------------------------------------------------------------------
 
-const plans = new Map()
-
-function getAllPlans(email) {
-    if (!plans.has(email)) {
-        plans.set(email, [])
+async function getAllPlans(userId) {
+    if (!ObjectId.isValid(userId)) {
+        console.error("UserId is not valid for getAllPlans");
+        return null; // Return null if ID is not valid, leading to a 404 in the route
     }
 
-    return plans.get(email)
+    return await plans().find({userId: new ObjectId(userId)}).toArray()
 }
 
-function getPlanByID(email, id) {
-    const index = plans.get(email).findIndex(p => p.id == id);
-    if (index === -1) {
-        return false;
+async function getPlanByID(userId, planId) {
+    if (!ObjectId.isValid(userId) || !ObjectId.isValid(planId)) {
+        console.error("UserId or planId is not valid for getPlanByID");
+        return null; // Return null if ID is not valid, leading to a 404 in the route
     }
 
-    return plans.get(email)[index]
+    return await plans().findOne({_id: new ObjectId(planId), userId: new ObjectId(userId)})
 }
 
-function createNewPlan(email, plan) {
-    plan.id = curID++
+async function createNewPlan(userId, plan) {
+    if (!ObjectId.isValid(userId)) {
+        console.error("UserId is not valid for createNewPlan");
+        return null; // Return null if ID is not valid
+    }
+
     plan.lastModified = new Date()
-    plans.get(email).push(plan)
+    plan.userId = new ObjectId(userId)
+    await plans().insertOne(plan)
     return plan
 }
 
-function updatePlan(email, id, plan) {
-    const index = plans.get(email).findIndex(p => p.id == id)
-    if (index === -1) {
-        return null;
+async function updatePlan(userId, planId, plan) {
+    if (!ObjectId.isValid(userId) || !ObjectId.isValid(planId)) {
+        console.error("UserId or planId is not valid for updatePlan");
+        return null; // Return null if ID is not valid
     }
-    plan.id = id
-    plan.lastModified = new Date()
-    plans.get(email)[index] = plan;
-    return plan;
+
+    // Otherwise we get an error because _id is immutable
+    if ('_id' in plan || 'userId' in plan) {
+        delete plan._id;
+        delete plan.userId;
+    }
+
+    return await plans().findOneAndUpdate(
+        {userId: new ObjectId(userId), _id: new ObjectId(planId)}, // Filter by ID
+        {
+            $set: {
+                ...plan, // Apply updates from dishData
+                lastModified: new Date() // Update the lastModified timestamp
+            }
+        },
+        {returnDocument: 'after'} // Options: return the modified document
+    );
 }
 
-function deletePlan(email, id) {
-    const index = plans.get(email).findIndex(p => p.id == id);
-    if (index === -1) {
-        return false;
+async function deletePlan(userId, planId) {
+    if (!ObjectId.isValid(userId) || !ObjectId.isValid(planId)) {
+        console.error("UserId or planId is not valid for deletePlan");
+        return null; // Return null if ID is not valid
     }
-    plans.get(email).splice(index, 1);
-    return true;
+
+    const result = await plans().deleteOne({_id: new ObjectId(planId), userId: new ObjectId(userId)});
+    return result.deletedCount > 0;
 }
 
 // Get plans
 
-app.get("/api/plans", verifyToken, (req, res) => {
-    res.json({plans: getAllPlans(req.user.email)})
+app.get("/api/plans", verifyToken, async (req, res) => {
+    res.json({plans: await getAllPlans(req.user.id)})
 })
 
-app.get("/api/plans/:id", verifyToken, (req, res) => {
+app.get("/api/plans/:id", verifyToken, async (req, res) => {
     const id = req.params.id
-    if(!id) {
+    if (!id) {
         res.status(400).json({error: "Request must contain an ID query parameter"})
         return
     }
-    if (isNaN(id)) {
-        res.status(400).json({error: "ID must be a number"})
-        return;
-    }
-    const plan = getPlanByID(req.user.email, id)
-    if(!plan) {
+
+    const plan = await getPlanByID(req.user.id, id)
+    if (!plan) {
         res.status(404).json({error: "Element with given ID does not exist"})
     } else {
         res.json(plan)
@@ -340,29 +421,25 @@ app.get("/api/plans/:id", verifyToken, (req, res) => {
 
 //Post Plans (create new)
 
-app.post("/api/plans", verifyToken, (req, res) => {
+app.post("/api/plans", verifyToken, async (req, res) => {
     const newPlan = req.body
-    const newPlanWithID = createNewPlan(req.user.email, newPlan)
+    const newPlanWithID = await createNewPlan(req.user.id, newPlan)
 
     res.status(201).json({kind: "Confirmation", message: "Creation successful", plan: newPlanWithID})
 })
 
 //Put Plan (update plan)
 
-app.put("/api/plans/:id", verifyToken, (req, res) => {
+app.put("/api/plans/:id", verifyToken, async (req, res) => {
     const plan = req.body
     const id = req.params.id
 
-    if(!id) {
+    if (!id) {
         res.status(400).json({error: "Request must contain an ID query parameter"})
         return
     }
-    if (isNaN(id)) {
-        res.status(400).json({error: "ID must be a number"})
-        return;
-    }
 
-    const updatedPlan = updatePlan(req.user.email, id, plan)
+    const updatedPlan = await updatePlan(req.user.id, id, plan)
 
     if (!updatedPlan) {
         res.status(404).send()
@@ -373,21 +450,17 @@ app.put("/api/plans/:id", verifyToken, (req, res) => {
 
 //Delete plan
 
-app.delete("/api/plans/:id", verifyToken, (req, res) => {
+app.delete("/api/plans/:id", verifyToken, async (req, res) => {
     const id = req.params.id
 
     if (!id) {
         res.status(400).send({error: "Request must contain an ID query parameter"})
         return
     }
-    if (isNaN(id)) {
-        res.status(400).json({error: "ID must be a number"})
-        return;
-    }
 
-    const success = deletePlan(req.user.email, id)
+    const success = await deletePlan(req.user.id, id)
 
-    if(success) {
+    if (success) {
         res.status(200).send({kind: "Confirmation", message: "Deletion successful", id: id})
     } else {
         res.status(404).send({kind: "Error", message: "Deletion not successful", id: id})
@@ -396,55 +469,53 @@ app.delete("/api/plans/:id", verifyToken, (req, res) => {
 
 //-------------------------------------------------------------------------------------------------------
 
-//-------------------------------------------------------------------------------------------------------
+//const recentWorkouts = new Map()
 
-const recentWorkouts = new Map()
-
-function getAllRecentWorkouts(email) {
-    if (!recentWorkouts.has(email)) {
-        recentWorkouts.set(email, [])
+async function getAllRecentWorkouts(userId) {
+    if (!ObjectId.isValid(userId)) {
+        console.error("UserId is not valid for getAllRecentWorkouts");
+        return null; // Return null if ID is not valid, leading to a 404 in the route
     }
 
-    return recentWorkouts.get(email)
+    return await recentWorkouts().find({userId: new ObjectId(userId)}).toArray()
 }
 
-function getRecentWorkoutByID(email, id) {
-    const index = recentWorkouts.get(email).findIndex(w => w.id == id);
-    if (index === -1) {
-        return false;
+async function getRecentWorkoutByID(userId, recentWorkoutId) {
+    if (!ObjectId.isValid(userId) || !ObjectId.isValid(recentWorkoutId)) {
+        console.error("UserId or recentWorkoutId is not valid for getRecentWorkoutByID");
+        return null; // Return null if ID is not valid, leading to a 404 in the route
     }
 
-    return recentWorkouts.get(email)[index]
+    return await recentWorkouts().findOne({_id: new ObjectId(recentWorkoutId), userId: new ObjectId(userId)})
 }
 
-function createNewRecentWorkout(email, recentWorkout) {
-    recentWorkouts.id = curID++
-    recentWorkouts.lastModified = new Date()
-    recentWorkouts.get(email).push(recentWorkout)
-    if (recentWorkouts.get(email).length > 10) {
-        recentWorkouts.get(email).pop()
+async function createNewRecentWorkout(userId, recentWorkout) {
+    if (!ObjectId.isValid(userId)) {
+        console.error("UserId is not valid for createNewRecentWorkout");
+        return null; // Return null if ID is not valid
     }
+
+    recentWorkout.lastModified = new Date()
+    recentWorkout.userId = new ObjectId(userId)
+    await recentWorkouts().insertOne(recentWorkout)
     return recentWorkout
 }
 
 // Get plans
 
-app.get("/api/recentworkouts", verifyToken, (req, res) => {
-    res.json({workouts: getAllRecentWorkouts(req.user.email)})
+app.get("/api/recentworkouts", verifyToken, async (req, res) => {
+    res.json({workouts: await getAllRecentWorkouts(req.user.id)})
 })
 
-app.get("/api/recentworkouts/:id", verifyToken, (req, res) => {
+app.get("/api/recentworkouts/:id", verifyToken, async (req, res) => {
     const id = req.params.id
-    if(!id) {
+    if (!id) {
         res.status(400).json({error: "Request must contain an ID query parameter"})
         return
     }
-    if (isNaN(id)) {
-        res.status(400).json({error: "ID must be a number"})
-        return;
-    }
-    const recentWorkout = getRecentWorkoutByID(req.user.email, id)
-    if(!recentWorkout) {
+
+    const recentWorkout = await getRecentWorkoutByID(req.user.id, id)
+    if (!recentWorkout) {
         res.status(404).json({error: "Element with given ID does not exist"})
     } else {
         res.json(recentWorkout)
@@ -453,9 +524,9 @@ app.get("/api/recentworkouts/:id", verifyToken, (req, res) => {
 
 //Post Plans (create new)
 
-app.post("/api/recentworkouts", verifyToken, (req, res) => {
+app.post("/api/recentworkouts", verifyToken, async (req, res) => {
     const newRecentWorkout = req.body
-    const newRecentWorkoutWithID = createNewRecentWorkout(req.user.email, newRecentWorkout)
+    const newRecentWorkoutWithID = await createNewRecentWorkout(req.user.id, newRecentWorkout)
 
     res.status(201).json({kind: "Confirmation", message: "Creation successful", workout: newRecentWorkoutWithID})
 })
@@ -463,14 +534,14 @@ app.post("/api/recentworkouts", verifyToken, (req, res) => {
 //-------------------------------------------------------------------------------------------------------
 
 
-const meals = []
+//const meals = []
 
-const goals = {
+/*const goals = {
   calories: 3000,
   proteins: 150,
   fats: 70,
   carbohydrates: 200
-};
+};*/
 
 function getAllMeals() {
   // TODO: Perform DB search
@@ -589,7 +660,7 @@ app.put("/api/meals/:id", verifyToken, (req, res) => {
   const idParam = req.params["id"];
   const id = Number(idParam);
 
-  if (!idParam || isNaN(id)) {
+  if (!idParam) {
     res.status(400).json({ error: "ID must be a valid number" });
     return;
   }
@@ -610,7 +681,7 @@ app.delete("/api/meals/:id", verifyToken, (req, res) => {
   const idParam = req.params["id"];
   const id = Number(idParam);
 
-  if (!idParam || isNaN(id)) {
+  if (!idParam) {
     res.status(400).json({ error: "ID must be a valid number" });
     return;
   }
