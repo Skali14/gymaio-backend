@@ -396,6 +396,72 @@ app.delete("/api/plans/:id", verifyToken, (req, res) => {
 
 //-------------------------------------------------------------------------------------------------------
 
+//-------------------------------------------------------------------------------------------------------
+
+const recentWorkouts = new Map()
+
+function getAllRecentWorkouts(email) {
+    if (!recentWorkouts.has(email)) {
+        recentWorkouts.set(email, [])
+    }
+
+    return recentWorkouts.get(email)
+}
+
+function getRecentWorkoutByID(email, id) {
+    const index = recentWorkouts.get(email).findIndex(w => w.id == id);
+    if (index === -1) {
+        return false;
+    }
+
+    return recentWorkouts.get(email)[index]
+}
+
+function createNewRecentWorkout(email, recentWorkout) {
+    recentWorkouts.id = curID++
+    recentWorkouts.lastModified = new Date()
+    recentWorkouts.get(email).push(recentWorkout)
+    if (recentWorkouts.get(email).length > 10) {
+        recentWorkouts.get(email).pop()
+    }
+    return recentWorkout
+}
+
+// Get plans
+
+app.get("/api/recentworkouts", verifyToken, (req, res) => {
+    res.json({workouts: getAllRecentWorkouts(req.user.email)})
+})
+
+app.get("/api/recentworkouts/:id", verifyToken, (req, res) => {
+    const id = req.params.id
+    if(!id) {
+        res.status(400).json({error: "Request must contain an ID query parameter"})
+        return
+    }
+    if (isNaN(id)) {
+        res.status(400).json({error: "ID must be a number"})
+        return;
+    }
+    const recentWorkout = getRecentWorkoutByID(req.user.email, id)
+    if(!recentWorkout) {
+        res.status(404).json({error: "Element with given ID does not exist"})
+    } else {
+        res.json(recentWorkout)
+    }
+})
+
+//Post Plans (create new)
+
+app.post("/api/recentworkouts", verifyToken, (req, res) => {
+    const newRecentWorkout = req.body
+    const newRecentWorkoutWithID = createNewRecentWorkout(req.user.email, newRecentWorkout)
+
+    res.status(201).json({kind: "Confirmation", message: "Creation successful", workout: newRecentWorkoutWithID})
+})
+
+//-------------------------------------------------------------------------------------------------------
+
 
 const meals = []
 
