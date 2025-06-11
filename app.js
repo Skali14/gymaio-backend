@@ -170,7 +170,24 @@ async function getAllExercises(userId) {
         return null; // Return null if ID is not valid, leading to a 404 in the route
     }
 
-    return await exercises().find({userId: new ObjectId(userId)}).toArray()
+    const results = await exercises().find({
+        $or: [
+            { userId: new ObjectId(userId) },
+            { own: false }
+        ]}).toArray()
+
+    return results.map(ex => {
+        const favorite =
+            ex.own && ex.userId?.toString() === new ObjectId(userId).toString()
+                ? !!ex.favorite
+                : !!ex.favorites?.[new ObjectId(userId).toString()];
+
+        // Remove internal favorites map
+        const { favorites, ...rest } = ex;
+        return { ...rest, favorite };
+    });
+
+
 }
 
 async function getExerciseByID(userId, exerciseId) {
@@ -180,7 +197,21 @@ async function getExerciseByID(userId, exerciseId) {
         return null; // Return null if ID is not valid, leading to a 404 in the route
     }
 
-    return await exercises().findOne({_id: new ObjectId(exerciseId), userId: new ObjectId(userId)})
+    const ex = await exercises().findOne({
+        $or: [
+            { _id: new ObjectId(exerciseId), userId: new ObjectId(userId) },
+            { _id: new ObjectId(exerciseId), own: false }
+        ]});
+
+
+    const favorite =
+        ex.own && ex.userId?.toString() === new ObjectId(userId).toString()
+            ? !!ex.favorite
+            : !!ex.favorites?.[new ObjectId(userId).toString()];
+
+    // Remove internal favorites map
+    const { favorites, ...rest } = ex;
+    return { ...rest, favorite };
 }
 
 async function createNewExercise(userId, exercise) {
@@ -190,7 +221,12 @@ async function createNewExercise(userId, exercise) {
     }
 
     exercise.lastModified = new Date()
-    exercise.userId = new ObjectId(userId)
+    if (exercise.own) {
+        exercise.userId = new ObjectId(userId)
+        exercise.favorite = false
+    } else {
+        exercise.favorites = { [userId]: false };
+    }
     await exercises().insertOne(exercise)
     return exercise
 }
@@ -200,16 +236,36 @@ async function changeFavorite(userId, exerciseId, favorite) {
         console.error("UserId or ExerciseId is not valid for changeFavorite");
         return null; // Return null if ID is not valid
     }
-    let test = await exercises().findOneAndUpdate(
-        {userId: new ObjectId(userId), _id: new ObjectId(exerciseId)}, // Filter by ID
-        {
-            $set: {
-                favorite: favorite, // Apply updates from dishData
-                lastModified: new Date() // Update the lastModified timestamp
+    const exercise = await exercises().findOne({ _id: new ObjectId(exerciseId) });
+
+    if (!exercise) {
+        console.error("Exercise not found");
+        return null;
+    }
+
+    if (exercise.own && exercise.userId?.toString() === new ObjectId(userId).toString()) {
+        // User owns this exercise -> update 'favorite' directly
+        await exercises().updateOne(
+            { _id: new ObjectId(exerciseId) },
+            {
+                $set: {
+                    favorite: favorite,
+                    lastModified: new Date()
+                }
             }
-        },
-        {returnDocument: 'after'} // Options: return the modified document
-    );
+        );
+    } else {
+        // Shared exercise -> update favorites[userId] = true/false
+        await exercises().updateOne(
+            { _id: new ObjectId(exerciseId) },
+            {
+                $set: {
+                    [`favorites.${new ObjectId(userId)}`]: favorite,
+                    lastModified: new Date()
+                }
+            }
+        );
+    }
     return true
 }
 
@@ -226,7 +282,7 @@ async function updateExercise(userId, exerciseId, exercise) {
     }
 
     return await exercises().findOneAndUpdate(
-        {userId: new ObjectId(userId), _id: new ObjectId(exerciseId)}, // Filter by ID
+        {userId: new ObjectId(userId), _id: new ObjectId(exerciseId), own: true}, // Filter by ID
         {
             $set: {
                 ...exercise, // Apply updates from dishData
