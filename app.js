@@ -608,11 +608,7 @@ async function getAllMeals(userId) {
   console.log('Fetching meals for:', userId);
 
   const mealsToday = await meals().find({
-    userId: new ObjectId(userId),
-    lastModified: {
-      $gte: startOfToday(),
-      $lte: endOfToday()
-    }
+    userId: new ObjectId(userId)
   }).toArray();
   console.log(mealsToday)
   return mealsToday;
