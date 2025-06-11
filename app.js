@@ -671,8 +671,10 @@ app.put("/api/goals", verifyToken, async (req, res) => {
   const success = await updateGoal(req.user.id, goalType, value)
   if (!success) {
     res.status(404).json({ error: "Goal type not found" });
+  } else {
+    res.status(200).json({ message: "Goal updated successfully", goals });
   }
-  res.status(200).json({ message: "Goal updated successfully", goals });
+
 })
 
 
