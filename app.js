@@ -10,6 +10,8 @@ const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'your_dev_secret_here';
 const uri = 'mongodb+srv://admin:GymAIO123@gymaio.fzchvtj.mongodb.net/?retryWrites=true&w=majority&appName=GymAIO';
 
+const { startOfToday, endOfToday } = require('date-fns');
+
 const client = new MongoClient(uri, {
     serverApi: {
         version: ServerApiVersion.v1,
@@ -20,8 +22,8 @@ const client = new MongoClient(uri, {
 
 const dbName = "gymaio";
 const exercisesCollectionName = "exercises";
-const mealsCollectionName = "goals";
-const goalsCollectionName = "meals";
+const mealsCollectionName = "meals";
+const goalsCollectionName = "goals";
 const plansCollectionName = "plans";
 const recentWorkoutsCollectionName = "recentWorkouts";
 const usersCollectionName = "users";
@@ -129,7 +131,10 @@ app.post('/api/register', async (req, res) => {
 
     // Add new user
     const newUser = {email, password, admin: false}; // NOTE: password should be hashed in real apps
-    await users().insertOne(newUser);
+    const result = await users().insertOne(newUser);
+    const userId = result.insertedId;
+
+    await createGoalsForUser(userId);
 
     // Optional: return JWT on signup
     //const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '1h' });
@@ -543,77 +548,110 @@ app.post("/api/recentworkouts", verifyToken, async (req, res) => {
   carbohydrates: 200
 };*/
 
-function getAllMeals() {
-  // TODO: Perform DB search
-  return meals
+async function getAllMeals(userId) {
+  console.log('Fetching meals for:', userId);
+
+  const mealsToday = await meals().find({
+    userId: new ObjectId(userId),
+    lastModified: {
+      $gte: startOfToday(),
+      $lte: endOfToday()
+    }
+  }).toArray();
+  console.log(mealsToday)
+  return mealsToday;
 }
 
-function createNewMeal(meal) {
+async function createNewMeal(meal, userId) {
   // TODO: Insert into DB
-  meal.id = curID++
-  meals.push(meal)
-  return meal
+  meal.userId = new ObjectId(userId)
+  meal.lastModified = new Date();
+  const result = await meals().insertOne(meal);
+  return { ...meal, _id: result.insertedId };
 }
 
-function updateMeal(id, meal) {
-  // TODO: Search and update in DB
-  const index = meals.findIndex(meal => meal.id == id)
-  console.log(index)
-  if (index === -1) {
-    // Meal not found
-    return null
+async function updateMeal(id, meal, userId) {
+  meal.lastModified = new Date(); // Update timestamp
+  delete meal._id
+
+  return await meals().findOneAndUpdate(
+    { _id:  new ObjectId(id), userId: new ObjectId(userId)},
+    { $set: meal },
+    { returnDocument: 'after' } // Return the updated document
+  );
+
+}
+
+async function deleteMeal(id, userId) {
+  const result = await meals().deleteOne({ _id: new ObjectId(id), userId: new ObjectId(userId) });
+  return result.deletedCount === 1;
+}
+
+async function getAllGoals(userId) {
+  console.log('UserId in getAllGoals:', userId);
+
+  const goalData = await goals().findOne({userId: new ObjectId(userId)})
+  if (!goalData) {
+    createGoalsForUser(userId)
+    goalData = await goals().findOne({userId: new ObjectId(userId)})
   }
-  meal.id = id
-  meals[index] = meal
-  return meal
+  return goalData
 }
 
-function deleteMeal(id) {
-  // TODO: Delete from DB
-  const index = meals.findIndex(meal => meal.id == id)
-  if (index === -1) {
-    //Meal not found
-    return false 
-  }
-  meals.splice(index, 1)
-  return true // Deletion successful
-}
-
-function getAllGoals() {
+async function getGoalByType(userId, goalType) {
   // TODO: Perform DB search
-  return goals
+  return await getAllGoals(userId)[goalType] ?? null;
 }
 
-function getGoalByType(goalType) {
-  // TODO: Perform DB search
-  return goals[goalType] ?? null;
+async function createGoalsForUser(userId) {
+  await goals().insertOne({
+    userId: new ObjectId(userId),
+    calories: 0,
+    carbohydrates: 0,
+    fats: 0
+  });
 }
 
-function updateGoal(goalType, value) {
-  if (!(goalType in goals)) {
-    return false;  // goalType not found
+async function updateGoal(userId, goalType, value) {
+  const allowedGoals = ['calories', 'fats', 'carbohydrates']
+  if (!allowedGoals.includes(goalType)) {
+    return false;
   }
+
+  const update = { $set: { [goalType]: value } };
+
+  const result = await goals().updateOne(
+    { userId: new ObjectId(userId) },
+      update
+  );
   
-  goals[goalType] = value;
-  return true;
+  return result.modifiedCount > 0;
 }
 
-function deleteGoal(goalType) {
-  return updateGoal(goalType, 0)
+async function deleteGoal(userId, goalType) {
+  return await updateGoal(goalType, 0)
 }
 
 
 
 //Goals get
-app.get("/api/goals", verifyToken, (req, res) => {
-  res.json({goals: getAllGoals()})
-})
+app.get("/api/goals", verifyToken, async (req, res) => {
+  const goalsData = await getAllGoals(req.user.id);
+  if (!goalsData) {
+    return res.status(404).json({ message: 'Goals not found' });
+  }
+
+  // Create a copy without _id and userId
+  const { _id, userId, ...cleanGoals } = goalsData;
+
+  res.json({ goals: cleanGoals });
+});
 
 //Goals get by type
-app.get("/api/goals/:goalType", verifyToken, (req, res) => {
+app.get("/api/goals/:goalType", verifyToken, async (req, res) => {
   const goalType = req.params.goalType;
 
-  const goal = getGoalByType(goalType);
+  const goal = await getGoalByType(req.params.id, goalType);
 
   if (goal === null || goal === undefined) {
     return res.status(404).json({ error: "Goal not found" });
@@ -624,13 +662,13 @@ app.get("/api/goals/:goalType", verifyToken, (req, res) => {
 
 
 //Goals update
-app.put("/api/goals", verifyToken, (req, res) => {
+app.put("/api/goals", verifyToken, async (req, res) => {
   const { goalType, value } = req.body
 
   if (typeof goalType !== "string" || typeof value !== "number" || value < 0) {
     return res.status(400).json({ error: "Invalid goalType or value" });
   }
-  const success = updateGoal(goalType, value)
+  const success = await updateGoal(req.user.id, goalType, value)
   if (!success) {
     res.status(404).json({ error: "Goal type not found" });
   }
@@ -639,33 +677,32 @@ app.put("/api/goals", verifyToken, (req, res) => {
 
 
 //Meals get
-app.get("/api/meals", verifyToken, (_req, res) => {
-  res.json({ meals: getAllMeals() })
+app.get("/api/meals", verifyToken, async (req, res) => {
+  res.json({ meals: await getAllMeals(req.user.id) })
 })
 
 //Meals create
-app.post("/api/meals", verifyToken, (req, res) => {
+app.post("/api/meals", verifyToken, async (req, res) => {
   const meal = req.body 
   //TODO validate meal
 
-  const newMealWithId = createNewMeal(meal)
+  const newMealWithId = await createNewMeal(meal, req.user.id)
   res.status(201).json(newMealWithId)
 })
 
 
 //Meals update
-app.put("/api/meals/:id", verifyToken, (req, res) => {
+app.put("/api/meals/:id", verifyToken, async (req, res) => {
   const meal = req.body
 
-  const idParam = req.params["id"];
-  const id = Number(idParam);
+  const idParam = req.params.id;
 
-  if (!idParam) {
+  if (!ObjectId.isValid(idParam)) {
     res.status(400).json({ error: "ID must be a valid number" });
     return;
   }
 
-  const updatedMeal = updateMeal(id, meal)
+  const updatedMeal = await updateMeal(idParam, meal, req.user.id)
 
   if (!updatedMeal) {
     res.status(404).send()
@@ -677,20 +714,19 @@ app.put("/api/meals/:id", verifyToken, (req, res) => {
 })
 
 //Meals delete
-app.delete("/api/meals/:id", verifyToken, (req, res) => {
-  const idParam = req.params["id"];
-  const id = Number(idParam);
+app.delete("/api/meals/:id", verifyToken, async (req, res) => {
+  const idParam = req.params.id;
 
-  if (!idParam) {
+  if (!ObjectId.isValid(idParam)) {
     res.status(400).json({ error: "ID must be a valid number" });
     return;
   }
 
-  const success = deleteMeal(id)
+  const success = await deleteMeal(idParam, req.user.id)
   if (success) {
     res.status(204).send()
   } else {
-    res.status(404).json({ kind: "Error", message: "Deletion not successful", id: id })
+    res.status(404).json({ kind: "Error", message: "Deletion not successful", id: idParam })
   }
 })
 
