@@ -590,7 +590,7 @@ async function deleteMeal(id, userId) {
 async function getAllGoals(userId) {
   console.log('UserId in getAllGoals:', userId);
 
-  const goalData = await goals().findOne({userId: new ObjectId(userId)})
+  goalData = await goals().findOne({userId: new ObjectId(userId)})
   if (!goalData) {
     createGoalsForUser(userId)
     goalData = await goals().findOne({userId: new ObjectId(userId)})
