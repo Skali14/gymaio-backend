@@ -130,7 +130,7 @@ app.post('/api/register', async (req, res) => {
     }
 
     // Add new user
-    const newUser = {email, password, admin: false}; // NOTE: password should be hashed in real apps
+    const newUser = {firstname, lastname, email, password, admin: false}; // NOTE: password should be hashed in real apps
     const result = await users().insertOne(newUser);
     const userId = result.insertedId;
 
@@ -154,6 +154,8 @@ app.get("/api/user", verifyToken, async (req, res) => {
     // Return user data without sensitive information (password)
     const userData = {
         id: user._id.toString(),
+        firstname: user.firstname,
+        lastname: user.lastname,
         email: user.email,
         admin: user.admin,
         // Add other user fields as needed
@@ -658,9 +660,10 @@ async function getGoalByType(userId, goalType) {
 async function createGoalsForUser(userId) {
   await goals().insertOne({
     userId: new ObjectId(userId),
-    calories: 0,
-    carbohydrates: 0,
-    fats: 0
+    calories: 2000,
+    proteins: 100,
+    carbohydrates: 150,
+    fats: 50
   });
 }
 
