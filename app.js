@@ -668,7 +668,7 @@ async function createGoalsForUser(userId) {
 }
 
 async function updateGoal(userId, goalType, value) {
-  const allowedGoals = ['calories', 'fats', 'carbohydrates']
+  const allowedGoals = ['calories', 'proteins', 'fats', 'carbohydrates']
   if (!allowedGoals.includes(goalType)) {
     return false;
   }
