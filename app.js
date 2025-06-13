@@ -622,12 +622,22 @@ async function createNewMeal(meal, userId) {
 }
 
 async function updateMeal(id, meal, userId) {
-  meal.lastModified = new Date(); // Update timestamp
-  delete meal._id
+    if (!ObjectId.isValid(userId) || !ObjectId.isValid(id)) {
+        console.error("UserId or MealId is not valid for updateMeal");
+        return null; // Return null if ID is not valid
+    }
+
+    if ('_id' in meal || 'userId' in meal) {
+        delete meal._id;
+        delete meal.userId;
+    }
 
   return await meals().findOneAndUpdate(
     { _id:  new ObjectId(id), userId: new ObjectId(userId)},
-    { $set: meal },
+    { $set: {
+            ...meal, // Apply updates from dishData
+            lastModified: new Date() // Update the lastModified timestamp
+        } },
     { returnDocument: 'after' } // Return the updated document
   );
 
