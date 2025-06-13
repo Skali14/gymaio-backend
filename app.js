@@ -107,7 +107,7 @@ app.post("/api/login", async (req, res) => {
 
     const user = await users().findOne({email: email, password: password});
     if (user) {
-        const token = jwt.sign({email: user.email, id: user._id.toString(), admin: user.admin}, JWT_SECRET, {expiresIn: '1h'});
+        const token = jwt.sign({email: user.email, id: user._id.toString(), admin: user.admin}, JWT_SECRET, {expiresIn: '24h'});
         res.json({message: "Login successful", token: token});
     } else {
         res.status(401).json({error: "Invalid credentials"});
