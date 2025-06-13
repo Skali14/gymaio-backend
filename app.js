@@ -8,7 +8,7 @@ var cors = require('cors');
 
 const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'your_dev_secret_here';
-const uri = 'mongodb+srv://admin:GymAIO123@gymaio.fzchvtj.mongodb.net/?retryWrites=true&w=majority&appName=GymAIO';
+const uri = process.env.DB_URI || 'mongodb+srv://admin:GymAIO123@gymaio.fzchvtj.mongodb.net/?retryWrites=true&w=majority&appName=GymAIO';
 
 const { startOfToday, endOfToday } = require('date-fns');
 
@@ -107,7 +107,7 @@ app.post("/api/login", async (req, res) => {
 
     const user = await users().findOne({email: email, password: password});
     if (user) {
-        const token = jwt.sign({email: user.email, id: user._id.toString()}, JWT_SECRET, {expiresIn: '1h'});
+        const token = jwt.sign({email: user.email, id: user._id.toString(), admin: user.admin}, JWT_SECRET, {expiresIn: '1h'});
         res.json({message: "Login successful", token: token});
     } else {
         res.status(401).json({error: "Invalid credentials"});
@@ -162,9 +162,6 @@ app.get("/api/user", verifyToken, async (req, res) => {
     };
     res.json({user: userData});
 })
-
-
-let curID = 1
 
 async function getAllExercises(userId) {
     if (!ObjectId.isValid(userId)) {
