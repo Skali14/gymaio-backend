@@ -5,6 +5,8 @@ var logger = require('morgan');
 const e = require("express");
 const { MongoClient, ServerApiVersion, ObjectId} = require('mongodb');
 var cors = require('cors');
+const url = require('url');
+
 
 const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'your_dev_secret_here';
@@ -223,10 +225,15 @@ async function createNewExercise(userId, exercise, userIsAdmin) {
     if (exercise.own) {
         exercise.userId = new ObjectId(userId)
         exercise.favorite = false
+        await exercises().insertOne(exercise)
     } else {
+        //shared Exercise
         exercise.favorites = { [userId]: false };
+        await exercises().insertOne(exercise)
+        const event = { collection: 'exercises', operation: 'create', payload: exercise };
+        broadcast(event, userId);
     }
-    await exercises().insertOne(exercise)
+
     return exercise
 }
 
@@ -292,7 +299,8 @@ async function updateExercise(userId, exerciseId, exercise, userIsAdmin) {
             {returnDocument: 'after'} // Options: return the modified document
         );
     } else {
-        return await exercises().findOneAndUpdate(
+        //Shared exercise
+        const updatedExercise = await exercises().findOneAndUpdate(
             {_id: new ObjectId(exerciseId), own: false}, // Filter by ID
             {
                 $set: {
@@ -302,6 +310,9 @@ async function updateExercise(userId, exerciseId, exercise, userIsAdmin) {
             },
             {returnDocument: 'after'} // Options: return the modified document
         );
+        const event = { collection: 'exercises', operation: 'update', payload: updateExercise};
+        broadcast(event, userId);
+        return updateExercise;
     }
 
 
@@ -322,7 +333,12 @@ async function deleteExercise(userId, exerciseId, userIsAdmin) {
     if (ex.own) {
         result = await exercises().deleteOne({_id: new ObjectId(exerciseId), userId: new ObjectId(userId)});
     } else {
+        //Shared exercise
         result = await exercises().deleteOne({_id: new ObjectId(exerciseId), own: false});
+        if (result.deletedCount > 0) {
+            const event = { collection: 'exercises', operation: 'delete', payload: exerciseId };
+            broadcast(event, userId);
+        }
     }
 
 
@@ -822,23 +838,42 @@ app.delete("/api/meals/:id", verifyToken, async (req, res) => {
 })
 
 
-// Websocket
+// --- WebSocket Server Setup ---
 const { WebSocketServer } = require('ws'); // Import WebSocketServer
 const wsPort = 3002;
 const wss = new WebSocketServer({ port: wsPort });
-
 console.log(`WebSocket server started on port ${wsPort}`);
+/**
+* Broadcasts an event to all interested WebSocket clients.
+* @param {object} event The event object containing collection, operation, and payload.
+* @param {string} [excludeClientId] An optional clientId to exclude from the broadcast.
+*/
+function broadcast(event, excludeClientId = null) {
+    const interestKey = `${event.collection}:${event.operation}`.toLowerCase();
+    console.log(`Broadcasting event for interest: [${interestKey}]`);
 
-// We can add a simple connection listener for debugging purposes.
-wss.on('connection', ws => {
-    console.log('A new client connected to the WebSocket.');
-
-    ws.on('message', message => {
-        console.log('received from client: %s', message);
+    wss.clients.forEach(client => {
+        if (excludeClientId && client.clientId === excludeClientId) {
+        return; // Skip the originating client
+        }
+        if (client.readyState === client.OPEN && client.interests && client.interests.has(interestKey)) {
+        client.send(JSON.stringify(event));
+        }
     });
+    }
 
+
+wss.on('connection', (ws, req) => {
+    const parameters = url.parse(req.url, true);
+    const clientId = req.user.id;
+    const interestsQuery = parameters.query.interests || "";
+    const interests = new Set(interestsQuery.split(',').filter(i => i));
+    ws.clientId = clientId;
+    ws.interests = interests;
+    console.log(`Client connected with ID: ${ws.clientId} and interests:`, ws.interests);
+    
     ws.on('close', () => {
-        console.log('Client has disconnected from WebSocket.');
+        console.log(`Client ${ws.clientId} has disconnected.`);
     });
 });
 
