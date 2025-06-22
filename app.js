@@ -310,9 +310,9 @@ async function updateExercise(userId, exerciseId, exercise, userIsAdmin) {
             },
             {returnDocument: 'after'} // Options: return the modified document
         );
-        const event = { collection: 'exercises', operation: 'update', payload: updateExercise};
+        const event = { collection: 'exercises', operation: 'update', payload: updatedExercise};
         broadcast(event, userId);
-        return updateExercise;
+        return updatedExercise;
     }
 
 
@@ -865,7 +865,7 @@ function broadcast(event, excludeClientId = null) {
 
 wss.on('connection', (ws, req) => {
     const parameters = url.parse(req.url, true);
-    const clientId = req.user.id;
+    const clientId = parameters.query.id;
     const interestsQuery = parameters.query.interests || "";
     const interests = new Set(interestsQuery.split(',').filter(i => i));
     ws.clientId = clientId;
