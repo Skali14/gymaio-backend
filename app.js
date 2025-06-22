@@ -213,7 +213,7 @@ async function getExerciseByID(userId, exerciseId) {
     return { ...rest, favorite };
 }
 
-async function createNewExercise(userId, exercise) {
+async function createNewExercise(userId, exercise, userIsAdmin) {
     if (!ObjectId.isValid(userId)) {
         console.error("UserId is not valid for createNewExercise");
         return null; // Return null if ID is not valid
@@ -268,7 +268,7 @@ async function changeFavorite(userId, exerciseId, favorite) {
     return true
 }
 
-async function updateExercise(userId, exerciseId, exercise) {
+async function updateExercise(userId, exerciseId, exercise, userIsAdmin) {
     if (!ObjectId.isValid(userId) || !ObjectId.isValid(exerciseId)) {
         console.error("UserId or ExerciseId is not valid for updateExercise");
         return null; // Return null if ID is not valid
@@ -280,25 +280,52 @@ async function updateExercise(userId, exerciseId, exercise) {
         delete exercise.userId;
     }
 
-    return await exercises().findOneAndUpdate(
-        {userId: new ObjectId(userId), _id: new ObjectId(exerciseId), own: true}, // Filter by ID
-        {
-            $set: {
-                ...exercise, // Apply updates from dishData
-                lastModified: new Date() // Update the lastModified timestamp
-            }
-        },
-        {returnDocument: 'after'} // Options: return the modified document
-    );
+    if(exercise.own) {
+        return await exercises().findOneAndUpdate(
+            {userId: new ObjectId(userId), _id: new ObjectId(exerciseId), own: true}, // Filter by ID
+            {
+                $set: {
+                    ...exercise, // Apply updates from dishData
+                    lastModified: new Date() // Update the lastModified timestamp
+                }
+            },
+            {returnDocument: 'after'} // Options: return the modified document
+        );
+    } else {
+        return await exercises().findOneAndUpdate(
+            {_id: new ObjectId(exerciseId), own: false}, // Filter by ID
+            {
+                $set: {
+                    ...exercise, // Apply updates from dishData
+                    lastModified: new Date() // Update the lastModified timestamp
+                }
+            },
+            {returnDocument: 'after'} // Options: return the modified document
+        );
+    }
+
+
 }
 
-async function deleteExercise(userId, exerciseId) {
+async function deleteExercise(userId, exerciseId, userIsAdmin) {
     if (!ObjectId.isValid(userId) || !ObjectId.isValid(exerciseId)) {
         console.error("UserId or ExerciseId is not valid for updateExercise");
         return null; // Return null if ID is not valid
     }
 
-    const result = await exercises().deleteOne({_id: new ObjectId(exerciseId), userId: new ObjectId(userId)});
+    const ex = await exercises().findOne({
+        $or: [
+            { _id: new ObjectId(exerciseId), userId: new ObjectId(userId) },
+            { _id: new ObjectId(exerciseId), own: false }
+        ]});
+    let result;
+    if (ex.own) {
+        result = await exercises().deleteOne({_id: new ObjectId(exerciseId), userId: new ObjectId(userId)});
+    } else {
+        result = await exercises().deleteOne({_id: new ObjectId(exerciseId), own: false});
+    }
+
+
     return result.deletedCount > 0;
 }
 
@@ -327,7 +354,7 @@ app.get("/api/exercises/:id", verifyToken, async (req, res) => {
 
 app.post("/api/exercises", verifyToken, async (req, res) => {
     const newExercise = req.body
-    const newExerciseWithID = await createNewExercise(req.user.id, newExercise)
+    const newExerciseWithID = await createNewExercise(req.user.id, newExercise, req.user.admin)
 
     res.status(201).json({kind: "Confirmation", message: "Creation successful", exercise: newExerciseWithID})
 })
@@ -343,7 +370,7 @@ app.put("/api/exercises/:id", verifyToken, async (req, res) => {
         return
     }
 
-    const updatedExercise = await updateExercise(req.user.id, id, exercise)
+    const updatedExercise = await updateExercise(req.user.id, id, exercise, req.user.admin)
 
     if (!updatedExercise) {
         res.status(404).send()
@@ -383,7 +410,7 @@ app.delete("/api/exercises/:id", verifyToken, async (req, res) => {
         return
     }
 
-    const success = await deleteExercise(req.user.id, id)
+    const success = await deleteExercise(req.user.id, id, req.user.admin)
 
     if (success) {
         res.status(200).send({kind: "Confirmation", message: "Deletion successful", id: id})
