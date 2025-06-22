@@ -795,4 +795,24 @@ app.delete("/api/meals/:id", verifyToken, async (req, res) => {
 })
 
 
+// Websocket
+const { WebSocketServer } = require('ws'); // Import WebSocketServer
+const wsPort = 3002;
+const wss = new WebSocketServer({ port: wsPort });
+
+console.log(`WebSocket server started on port ${wsPort}`);
+
+// We can add a simple connection listener for debugging purposes.
+wss.on('connection', ws => {
+    console.log('A new client connected to the WebSocket.');
+
+    ws.on('message', message => {
+        console.log('received from client: %s', message);
+    });
+
+    ws.on('close', () => {
+        console.log('Client has disconnected from WebSocket.');
+    });
+});
+
 module.exports = app;
