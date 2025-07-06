@@ -1,5 +1,4 @@
 var express = require('express');
-var path = require('path');
 var cookieParser = require('cookie-parser');
 var logger = require('morgan');
 const e = require("express");
@@ -11,8 +10,6 @@ const url = require('url');
 const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'your_dev_secret_here';
 const uri = process.env.DB_URI || 'mongodb+srv://admin:GymAIO123@gymaio.fzchvtj.mongodb.net/?retryWrites=true&w=majority&appName=GymAIO';
-
-const { startOfToday, endOfToday } = require('date-fns');
 
 const client = new MongoClient(uri, {
     serverApi: {
@@ -33,18 +30,16 @@ const usersCollectionName = "users";
 async function connectDB() {
     try {
         await client.connect();
-        // Ping the 'foodioo' database to confirm connection
+        // Ping the database to confirm connection
         await client.db(dbName).command({ ping: 1 });
         console.log("Connection to DB successful");
     } catch (err) {
         console.error("Error during DB connection: ", err);
-        // Critical error: If the database isn't available, the app can't function.
-        // Consider exiting the process or implementing a retry mechanism for production.
         process.exit(1); // Exit if DB connection fails on startup
     }
 }
 
-connectDB(); // Call connectDB to establish the connection when the app starts
+connectDB();
 
 function exercises() {
     return client.db(dbName).collection(exercisesCollectionName);
@@ -81,21 +76,18 @@ const verifyToken = (req, res, next) => {
     if (err) {
       return res.status(401).json({ message: 'Token invalid or expired' });
     }
-    console.log('Decoded user:', decoded);
-    req.user = decoded; // You now have the payload (e.g., user ID, roles)
+    req.user = decoded;
     next();
   });
 };
 
 var app = express();
 
-app.use(cors()); // Enable CORS for all routes - good for development
+app.use(cors());
 app.use(logger('dev'));
 app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.urlencoded({ limit: '50mb', extended: true })); //Limit extended for uploading photos
 app.use(cookieParser());
-
-//app.use(express.static(path.join(__dirname, 'public')));
 
 app.get("/", (req, res) => {
   res.send(
@@ -103,13 +95,14 @@ app.get("/", (req, res) => {
   )
 })
 
-// Simple Login Endpoint (Typically POST)
+// Login Endpoint
 app.post("/api/login", async (req, res) => {
-    const {email, password} = req.body; // Assuming email and password in request body
+    const {email, password} = req.body;
 
+    // Find user by email and password from the provided credentials
     const user = await users().findOne({email: email, password: password});
     if (user) {
-        const token = jwt.sign({email: user.email, id: user._id.toString(), admin: user.admin}, JWT_SECRET, {expiresIn: '24h'});
+        const token = jwt.sign({email: user.email, id: user._id.toString(), admin: user.admin}, JWT_SECRET, {expiresIn: '24h'}); // Provide frotend with JWT token for further requests
         res.json({message: "Login successful", token: token});
     } else {
         res.status(401).json({error: "Invalid credentials"});
@@ -132,20 +125,18 @@ app.post('/api/register', async (req, res) => {
     }
 
     // Add new user
-    const newUser = {firstname, lastname, email, password, admin: false}; // NOTE: password should be hashed in real apps
+    const newUser = {firstname, lastname, email, password, admin: false}; // TODO: password hashing
     const result = await users().insertOne(newUser);
     const userId = result.insertedId;
 
     await createGoalsForUser(userId);
-
-    // Optional: return JWT on signup
-    //const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '1h' });
 
     res.status(201).json({message: 'User registered'});
 });
 
 //get user
 app.get("/api/user", verifyToken, async (req, res) => {
+
     // Find user by email from the decoded token
     const user = await users().findOne({email: req.user.email});
 
@@ -153,14 +144,12 @@ app.get("/api/user", verifyToken, async (req, res) => {
         return res.status(404).json({message: 'User not found'});
     }
 
-    // Return user data without sensitive information (password)
     const userData = {
         id: user._id.toString(),
         firstname: user.firstname,
         lastname: user.lastname,
         email: user.email,
         admin: user.admin,
-        // Add other user fields as needed
     };
     res.json({user: userData});
 })
@@ -168,49 +157,50 @@ app.get("/api/user", verifyToken, async (req, res) => {
 async function getAllExercises(userId) {
     if (!ObjectId.isValid(userId)) {
         console.error("UserId is not valid for getAllExercises");
-        return null; // Return null if ID is not valid, leading to a 404 in the route
+        return null; // Leads to 404 further on
     }
 
+    // Find all exercises which are either shared, or have been created by the user with userId
     const results = await exercises().find({
         $or: [
             { userId: new ObjectId(userId) },
             { own: false }
         ]}).toArray()
 
+    // If exercises is own, favorites is stored as a single bool, if it is shared, it is stored as a map of userId to bool. Depending on the type of exercises, the right one is extracted.
     return results.map(ex => {
         const favorite =
             ex.own && ex.userId?.toString() === new ObjectId(userId).toString()
                 ? !!ex.favorite
                 : !!ex.favorites?.[new ObjectId(userId).toString()];
 
-        // Remove internal favorites map
+        // Remove internal favorites map and only return a single bool as "favorite"
         const { favorites, ...rest } = ex;
         return { ...rest, favorite };
     });
-
-
 }
 
 async function getExerciseByID(userId, exerciseId) {
 
     if (!ObjectId.isValid(userId) || !ObjectId.isValid(exerciseId)) {
         console.error("UserId or ExerciseId is not valid for getExerciseByID");
-        return null; // Return null if ID is not valid, leading to a 404 in the route
+        return null; // Leads to 404 later on
     }
 
+    // Return either a shared or an own exercise
     const ex = await exercises().findOne({
         $or: [
             { _id: new ObjectId(exerciseId), userId: new ObjectId(userId) },
             { _id: new ObjectId(exerciseId), own: false }
         ]});
 
-
+    // If exercises is own, favorites is stored as a single bool, if it is shared, it is stored as a map of userId to bool. Depending on the type of exercises, the right one is extracted.
     const favorite =
         ex.own && ex.userId?.toString() === new ObjectId(userId).toString()
             ? !!ex.favorite
             : !!ex.favorites?.[new ObjectId(userId).toString()];
 
-    // Remove internal favorites map
+    // Remove internal favorites map and only return a single bool as "favorite"
     const { favorites, ...rest } = ex;
     return { ...rest, favorite };
 }
@@ -218,16 +208,17 @@ async function getExerciseByID(userId, exerciseId) {
 async function createNewExercise(userId, exercise, userIsAdmin) {
     if (!ObjectId.isValid(userId)) {
         console.error("UserId is not valid for createNewExercise");
-        return null; // Return null if ID is not valid
+        return null; // Leads to 404 later on
     }
 
     exercise.lastModified = new Date()
     if (exercise.own) {
+        // own exercise
         exercise.userId = new ObjectId(userId)
         exercise.favorite = false
         await exercises().insertOne(exercise)
-    } else {
-        //shared Exercise
+    } else if (userIsAdmin) {
+        // shared Exercise
         exercise.favorites = { [userId]: false };
         await exercises().insertOne(exercise)
         const event = { collection: 'exercises', operation: 'create', payload: exercise };
@@ -240,17 +231,17 @@ async function createNewExercise(userId, exercise, userIsAdmin) {
 async function changeFavorite(userId, exerciseId, favorite) {
     if (!ObjectId.isValid(userId) || !ObjectId.isValid(exerciseId)) {
         console.error("UserId or ExerciseId is not valid for changeFavorite");
-        return null; // Return null if ID is not valid
+        return null; // Leads to 404 later on
     }
     const exercise = await exercises().findOne({ _id: new ObjectId(exerciseId) });
 
     if (!exercise) {
         console.error("Exercise not found");
-        return null;
+        return null; // Leads to 404 later on
     }
 
     if (exercise.own && exercise.userId?.toString() === new ObjectId(userId).toString()) {
-        // User owns this exercise -> update 'favorite' directly
+        // own exercise -> update 'favorite' bool directly
         await exercises().updateOne(
             { _id: new ObjectId(exerciseId) },
             {
@@ -261,7 +252,7 @@ async function changeFavorite(userId, exerciseId, favorite) {
             }
         );
     } else {
-        // Shared exercise -> update favorites[userId] = true/false
+        // shared exercise -> update bool in favorites map
         await exercises().updateOne(
             { _id: new ObjectId(exerciseId) },
             {
@@ -278,7 +269,7 @@ async function changeFavorite(userId, exerciseId, favorite) {
 async function updateExercise(userId, exerciseId, exercise, userIsAdmin) {
     if (!ObjectId.isValid(userId) || !ObjectId.isValid(exerciseId)) {
         console.error("UserId or ExerciseId is not valid for updateExercise");
-        return null; // Return null if ID is not valid
+        return null; // Leads to 404 later on
     }
 
     // Otherwise we get an error because _id is immutable
@@ -288,27 +279,28 @@ async function updateExercise(userId, exerciseId, exercise, userIsAdmin) {
     }
 
     if(exercise.own) {
+        // own exercise
         return await exercises().findOneAndUpdate(
-            {userId: new ObjectId(userId), _id: new ObjectId(exerciseId), own: true}, // Filter by ID
+            {userId: new ObjectId(userId), _id: new ObjectId(exerciseId), own: true},
             {
                 $set: {
-                    ...exercise, // Apply updates from dishData
-                    lastModified: new Date() // Update the lastModified timestamp
+                    ...exercise,
+                    lastModified: new Date()
                 }
             },
-            {returnDocument: 'after'} // Options: return the modified document
+            {returnDocument: 'after'}
         );
-    } else {
-        //Shared exercise
+    } else if (userIsAdmin) {
+        // shared exercise
         const updatedExercise = await exercises().findOneAndUpdate(
-            {_id: new ObjectId(exerciseId), own: false}, // Filter by ID
+            {_id: new ObjectId(exerciseId), own: false},
             {
                 $set: {
-                    ...exercise, // Apply updates from dishData
-                    lastModified: new Date() // Update the lastModified timestamp
+                    ...exercise,
+                    lastModified: new Date()
                 }
             },
-            {returnDocument: 'after'} // Options: return the modified document
+            {returnDocument: 'after'}
         );
         const event = { collection: 'exercises', operation: 'update', payload: updatedExercise};
         broadcast(event, userId);
@@ -321,7 +313,7 @@ async function updateExercise(userId, exerciseId, exercise, userIsAdmin) {
 async function deleteExercise(userId, exerciseId, userIsAdmin) {
     if (!ObjectId.isValid(userId) || !ObjectId.isValid(exerciseId)) {
         console.error("UserId or ExerciseId is not valid for updateExercise");
-        return null; // Return null if ID is not valid
+        return null; // Leads to 404 later on
     }
 
     const ex = await exercises().findOne({
@@ -331,9 +323,10 @@ async function deleteExercise(userId, exerciseId, userIsAdmin) {
         ]});
     let result;
     if (ex.own) {
+        // own exercise
         result = await exercises().deleteOne({_id: new ObjectId(exerciseId), userId: new ObjectId(userId)});
-    } else {
-        //Shared exercise
+    } else if (userIsAdmin) {
+        // shared exercise
         result = await exercises().deleteOne({_id: new ObjectId(exerciseId), own: false});
         if (result.deletedCount > 0) {
             const event = { collection: 'exercises', operation: 'delete', payload: exerciseId };
@@ -440,7 +433,7 @@ app.delete("/api/exercises/:id", verifyToken, async (req, res) => {
 async function getAllPlans(userId) {
     if (!ObjectId.isValid(userId)) {
         console.error("UserId is not valid for getAllPlans");
-        return null; // Return null if ID is not valid, leading to a 404 in the route
+        return null; // Leads to 404 later on
     }
 
     return await plans().find({userId: new ObjectId(userId)}).toArray()
@@ -449,7 +442,7 @@ async function getAllPlans(userId) {
 async function getPlanByID(userId, planId) {
     if (!ObjectId.isValid(userId) || !ObjectId.isValid(planId)) {
         console.error("UserId or planId is not valid for getPlanByID");
-        return null; // Return null if ID is not valid, leading to a 404 in the route
+        return null; // Leads to 404 later on
     }
 
     return await plans().findOne({_id: new ObjectId(planId), userId: new ObjectId(userId)})
@@ -458,7 +451,7 @@ async function getPlanByID(userId, planId) {
 async function createNewPlan(userId, plan) {
     if (!ObjectId.isValid(userId)) {
         console.error("UserId is not valid for createNewPlan");
-        return null; // Return null if ID is not valid
+        return null; // Leads to 404 later on
     }
 
     plan.lastModified = new Date()
@@ -470,7 +463,7 @@ async function createNewPlan(userId, plan) {
 async function updatePlan(userId, planId, plan) {
     if (!ObjectId.isValid(userId) || !ObjectId.isValid(planId)) {
         console.error("UserId or planId is not valid for updatePlan");
-        return null; // Return null if ID is not valid
+        return null; // Leads to 404 later on
     }
 
     // Otherwise we get an error because _id is immutable
@@ -480,21 +473,21 @@ async function updatePlan(userId, planId, plan) {
     }
 
     return await plans().findOneAndUpdate(
-        {userId: new ObjectId(userId), _id: new ObjectId(planId)}, // Filter by ID
+        {userId: new ObjectId(userId), _id: new ObjectId(planId)},
         {
             $set: {
-                ...plan, // Apply updates from dishData
-                lastModified: new Date() // Update the lastModified timestamp
+                ...plan,
+                lastModified: new Date()
             }
         },
-        {returnDocument: 'after'} // Options: return the modified document
+        {returnDocument: 'after'}
     );
 }
 
 async function deletePlan(userId, planId) {
     if (!ObjectId.isValid(userId) || !ObjectId.isValid(planId)) {
         console.error("UserId or planId is not valid for deletePlan");
-        return null; // Return null if ID is not valid
+        return null; // Leads to 404 later on
     }
 
     const result = await plans().deleteOne({_id: new ObjectId(planId), userId: new ObjectId(userId)});
@@ -572,12 +565,10 @@ app.delete("/api/plans/:id", verifyToken, async (req, res) => {
 
 //-------------------------------------------------------------------------------------------------------
 
-//const recentWorkouts = new Map()
-
 async function getAllRecentWorkouts(userId) {
     if (!ObjectId.isValid(userId)) {
         console.error("UserId is not valid for getAllRecentWorkouts");
-        return null; // Return null if ID is not valid, leading to a 404 in the route
+        return null; // Leads to 404 later on
     }
 
     return await recentWorkouts().find({userId: new ObjectId(userId)}).toArray()
@@ -586,7 +577,7 @@ async function getAllRecentWorkouts(userId) {
 async function getRecentWorkoutByID(userId, recentWorkoutId) {
     if (!ObjectId.isValid(userId) || !ObjectId.isValid(recentWorkoutId)) {
         console.error("UserId or recentWorkoutId is not valid for getRecentWorkoutByID");
-        return null; // Return null if ID is not valid, leading to a 404 in the route
+        return null; // Leads to 404 later on
     }
 
     return await recentWorkouts().findOne({_id: new ObjectId(recentWorkoutId), userId: new ObjectId(userId)})
@@ -595,7 +586,7 @@ async function getRecentWorkoutByID(userId, recentWorkoutId) {
 async function createNewRecentWorkout(userId, recentWorkout) {
     if (!ObjectId.isValid(userId)) {
         console.error("UserId is not valid for createNewRecentWorkout");
-        return null; // Return null if ID is not valid
+        return null; // Leads to 404 later on
     }
 
     recentWorkout.lastModified = new Date()
@@ -636,28 +627,15 @@ app.post("/api/recentworkouts", verifyToken, async (req, res) => {
 
 //-------------------------------------------------------------------------------------------------------
 
-
-//const meals = []
-
-/*const goals = {
-  calories: 3000,
-  proteins: 150,
-  fats: 70,
-  carbohydrates: 200
-};*/
-
 async function getAllMeals(userId) {
-  console.log('Fetching meals for:', userId);
 
   const mealsToday = await meals().find({
     userId: new ObjectId(userId)
   }).toArray();
-  console.log(mealsToday)
   return mealsToday;
 }
 
 async function createNewMeal(meal, userId) {
-  // TODO: Insert into DB
   meal.userId = new ObjectId(userId)
   meal.lastModified = new Date();
   const result = await meals().insertOne(meal);
@@ -667,9 +645,10 @@ async function createNewMeal(meal, userId) {
 async function updateMeal(id, meal, userId) {
     if (!ObjectId.isValid(userId) || !ObjectId.isValid(id)) {
         console.error("UserId or MealId is not valid for updateMeal");
-        return null; // Return null if ID is not valid
+        return null; // Leads to 404 later on
     }
 
+    // Otherwise we get an error because _id is immutable
     if ('_id' in meal || 'userId' in meal) {
         delete meal._id;
         delete meal.userId;
@@ -678,10 +657,10 @@ async function updateMeal(id, meal, userId) {
   return await meals().findOneAndUpdate(
     { _id:  new ObjectId(id), userId: new ObjectId(userId)},
     { $set: {
-            ...meal, // Apply updates from dishData
-            lastModified: new Date() // Update the lastModified timestamp
+            ...meal,
+            lastModified: new Date()
         } },
-    { returnDocument: 'after' } // Return the updated document
+    { returnDocument: 'after' }
   );
 
 }
@@ -692,7 +671,6 @@ async function deleteMeal(id, userId) {
 }
 
 async function getAllGoals(userId) {
-  console.log('UserId in getAllGoals:', userId);
 
   goalData = await goals().findOne({userId: new ObjectId(userId)})
   if (!goalData) {
@@ -703,7 +681,6 @@ async function getAllGoals(userId) {
 }
 
 async function getGoalByType(userId, goalType) {
-  // TODO: Perform DB search
   return await getAllGoals(userId)[goalType] ?? null;
 }
 
@@ -777,7 +754,7 @@ app.put("/api/goals", verifyToken, async (req, res) => {
   if (!success) {
     res.status(404).json({ error: "Goal type not found" });
   } else {
-    res.status(200).json({ message: "Goal updated successfully", goals });
+    res.json({ message: "Goal updated successfully", goals });
   }
 
 })
@@ -816,8 +793,7 @@ app.put("/api/meals/:id", verifyToken, async (req, res) => {
     return
   }
 
-  // Explicit status 200 (OK) not necessary
-  res.status(200).json(updatedMeal)
+  res.json(updatedMeal)
 })
 
 //Meals delete
@@ -861,7 +837,6 @@ function broadcast(event, excludeClientId = null) {
         }
     });
     }
-
 
 wss.on('connection', (ws, req) => {
     const parameters = url.parse(req.url, true);
