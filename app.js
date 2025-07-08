@@ -9,7 +9,7 @@ const url = require('url');
 
 const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'your_dev_secret_here';
-const uri = process.env.DB_URI || 'mongodb+srv://admin:GymAIO123@gymaio.fzchvtj.mongodb.net/?retryWrites=true&w=majority&appName=GymAIO';
+const uri = process.env.DB_URI || 'your_db_uri_here';
 
 const client = new MongoClient(uri, {
     serverApi: {
